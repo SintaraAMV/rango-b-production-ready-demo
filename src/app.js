@@ -4,7 +4,12 @@ const PgSession = require('connect-pg-simple')(session);
 const path = require('path');
 const config = require('./config');
 const pool = require('./db');
-const { requestContext, requestLog } = require('./middleware');
+const {
+  requestContext,
+  securityHeaders,
+  requireSameOrigin,
+  requestLog,
+} = require('./middleware');
 const { sendAlert } = require('./alerts');
 const authRoutes = require('./routes/auth');
 const notesRoutes = require('./routes/notes');
@@ -14,7 +19,9 @@ const app = express();
 if (config.env === 'production') app.set('trust proxy', 1);
 
 app.use(requestContext);
+app.use(securityHeaders);
 app.use(express.json({ limit: '64kb' }));
+app.use(requireSameOrigin);
 app.use(requestLog);
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

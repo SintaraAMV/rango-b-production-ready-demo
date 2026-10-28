@@ -1,6 +1,11 @@
+if (process.env.NODE_ENV === 'production') {
+  console.error('El seed de demostración está bloqueado en producción');
+  process.exit(1);
+}
+
 const bcrypt = require('bcryptjs');
 const { Client } = require('pg');
-require('dotenv').config({ quiet: true });
+const config = require('../src/config');
 
 const users = [
   { username: 'alice', password: 'Alice-demo-2026', role: 'user' },
@@ -22,7 +27,10 @@ const notes = {
 };
 
 async function main() {
-  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  const client = new Client({
+    connectionString: config.databaseUrl,
+    ssl: config.databaseSsl ? { rejectUnauthorized: config.databaseSslRejectUnauthorized } : false,
+  });
   await client.connect();
   try {
     for (const u of users) {
@@ -34,9 +42,7 @@ async function main() {
       if (res.rows.length > 0) {
         for (const [title, body] of notes[u.username]) {
           await client.query('INSERT INTO notes (owner_id, title, body) VALUES ($1, $2, $3)', [
-            res.rows[0].id,
-            title,
-            body,
+            res.rows[0].id, title, body,
           ]);
         }
       }

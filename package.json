@@ -4,13 +4,14 @@
   "description": "Notas privadas por usuario para equipos pequeños",
   "main": "server.js",
   "private": true,
-  "engines": {
-    "node": ">=18"
-  },
+  "engines": { "node": ">=18" },
   "scripts": {
     "start": "node server.js",
-    "db:init": "node scripts/init-db.js",
-    "db:seed": "node scripts/seed.js"
+    "db:init": "node scripts/migrate.js",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed.js",
+    "prod:check": "node scripts/check-production.js",
+    "verify:production": "node scripts/verify-production.js"
   },
   "license": "UNLICENSED",
   "dependencies": {
