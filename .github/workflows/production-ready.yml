@@ -142,21 +142,21 @@ jobs:
           if NODE_ENV=production DATABASE_SSL=true SESSION_SECRET=12345678901234567890123456789012 npm run db:seed; then
             echo "expected demo seed production block"; exit 1
           fi
+          postgres_container=$(docker ps -aq --filter ancestor=postgres:16 | head -1)
+          test -n "$postgres_container"
+          docker start "$postgres_container" >/dev/null
+          for i in {1..20}; do docker exec "$postgres_container" pg_isready -U teamvault -d teamvault && break; sleep 1; done
           if npm run prod:check; then
             echo "expected active demo credential detection"; exit 1
           fi
           node -e "const b=require('bcryptjs'); b.hash('rotated-not-demo-password',10).then(h=>{console.log(h)})" > /tmp/newhash
           newhash=$(cat /tmp/newhash)
-          postgres_container=$(docker ps -aq --filter ancestor=postgres:16 | head -1)
-          test -n "$postgres_container"
-          docker start "$postgres_container" >/dev/null
-          for i in {1..20}; do docker exec "$postgres_container" pg_isready -U teamvault -d teamvault && break; sleep 1; done
           docker exec "$postgres_container" psql -U teamvault -d teamvault -c "UPDATE users SET password_hash = '$newhash' WHERE username IN ('alice','bob','admin')"
           npm run prod:check
 
       - name: Verify graceful shutdown
         run: |
-          PORT=3002 npm start > graceful.log 2>&1 &
+          PORT=3002 node server.js > graceful.log 2>&1 &
           pid=$!
           for i in {1..20}; do curl -fsS http://127.0.0.1:3002/ready && break; sleep 1; done
           kill -TERM "$pid"
