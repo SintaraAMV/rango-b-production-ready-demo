@@ -44,7 +44,9 @@ jobs:
       - name: Start alert receiver and TeamVault
         run: |
           node scripts/alert-receiver.js > alert-receiver.log 2>&1 &
+          echo $! > alert-receiver.pid
           npm start > teamvault.log 2>&1 &
+          echo $! > teamvault.pid
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:3000/ready; then exit 0; fi
             sleep 1
@@ -71,10 +73,14 @@ jobs:
           docker exec "$postgres_container" pg_restore -U teamvault -d teamvault_restore --no-owner /tmp/teamvault.dump
           original=$(docker exec "$postgres_container" psql -U teamvault -d teamvault -Atc "SELECT COUNT(*) FROM notes")
           restored=$(docker exec "$postgres_container" psql -U teamvault -d teamvault_restore -Atc "SELECT COUNT(*) FROM notes")
+          original_hash=$(docker exec "$postgres_container" psql -U teamvault -d teamvault -Atc "SELECT md5(string_agg(id::text || ':' || owner_id::text || ':' || title || ':' || body, '|' ORDER BY id)) FROM notes")
+          restored_hash=$(docker exec "$postgres_container" psql -U teamvault -d teamvault_restore -Atc "SELECT md5(string_agg(id::text || ':' || owner_id::text || ':' || title || ':' || body, '|' ORDER BY id)) FROM notes")
           test "$original" = "$restored"
+          test "$original_hash" = "$restored_hash"
           end=$(date +%s)
           echo "restore_seconds=$((end-start))" | tee restore-evidence.txt
           echo "notes_original=$original notes_restored=$restored" | tee -a restore-evidence.txt
+          echo "content_hash_match=yes" | tee -a restore-evidence.txt
 
       - name: Verify dependency failure and alert delivery
         run: |
