@@ -64,11 +64,13 @@ jobs:
       - name: Backup and isolated restore
         run: |
           start=$(date +%s)
-          pg_dump -h 127.0.0.1 -U teamvault -d teamvault -Fc -f /tmp/teamvault.dump
-          createdb -h 127.0.0.1 -U teamvault teamvault_restore
-          pg_restore -h 127.0.0.1 -U teamvault -d teamvault_restore --no-owner /tmp/teamvault.dump
-          original=$(psql -h 127.0.0.1 -U teamvault -d teamvault -Atc "SELECT COUNT(*) FROM notes")
-          restored=$(psql -h 127.0.0.1 -U teamvault -d teamvault_restore -Atc "SELECT COUNT(*) FROM notes")
+          postgres_container=$(docker ps -q --filter ancestor=postgres:16 | head -1)
+          test -n "$postgres_container"
+          docker exec "$postgres_container" pg_dump -U teamvault -d teamvault -Fc -f /tmp/teamvault.dump
+          docker exec "$postgres_container" createdb -U teamvault teamvault_restore
+          docker exec "$postgres_container" pg_restore -U teamvault -d teamvault_restore --no-owner /tmp/teamvault.dump
+          original=$(docker exec "$postgres_container" psql -U teamvault -d teamvault -Atc "SELECT COUNT(*) FROM notes")
+          restored=$(docker exec "$postgres_container" psql -U teamvault -d teamvault_restore -Atc "SELECT COUNT(*) FROM notes")
           test "$original" = "$restored"
           end=$(date +%s)
           echo "restore_seconds=$((end-start))" | tee restore-evidence.txt
