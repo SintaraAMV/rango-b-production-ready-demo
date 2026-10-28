@@ -1,0 +1,101 @@
+name: Production Ready verification
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: teamvault
+          POSTGRES_PASSWORD: teamvault-ci-password
+          POSTGRES_DB: teamvault
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U teamvault -d teamvault"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+    env:
+      DATABASE_URL: postgres://teamvault:teamvault-ci-password@127.0.0.1:5432/teamvault
+      SESSION_SECRET: ci-session-secret-123456789012345678901234567890
+      ALERT_WEBHOOK_URL: http://127.0.0.1:3100/alerts
+      NODE_ENV: test
+      PORT: 3000
+      PGPASSWORD: teamvault-ci-password
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - run: npm run db:init
+      - run: npm run db:seed
+
+      - name: Start alert receiver and TeamVault
+        run: |
+          node scripts/alert-receiver.js > alert-receiver.log 2>&1 &
+          npm start > teamvault.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/ready; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Verify application controls
+        run: node scripts/verify-production.js
+
+      - name: Verify logs are sanitized
+        run: |
+          ! grep -q 'Alice-demo-2026' teamvault.log
+          ! grep -q 'Bob-demo-2026' teamvault.log
+          ! grep -q 'Admin-demo-2026' teamvault.log
+          ! grep -q '"password"' teamvault.log
+
+      - name: Backup and isolated restore
+        run: |
+          start=$(date +%s)
+          pg_dump -h 127.0.0.1 -U teamvault -d teamvault -Fc -f /tmp/teamvault.dump
+          createdb -h 127.0.0.1 -U teamvault teamvault_restore
+          pg_restore -h 127.0.0.1 -U teamvault -d teamvault_restore --no-owner /tmp/teamvault.dump
+          original=$(psql -h 127.0.0.1 -U teamvault -d teamvault -Atc "SELECT COUNT(*) FROM notes")
+          restored=$(psql -h 127.0.0.1 -U teamvault -d teamvault_restore -Atc "SELECT COUNT(*) FROM notes")
+          test "$original" = "$restored"
+          end=$(date +%s)
+          echo "restore_seconds=$((end-start))" | tee restore-evidence.txt
+          echo "notes_original=$original notes_restored=$restored" | tee -a restore-evidence.txt
+
+      - name: Verify dependency failure and alert delivery
+        run: |
+          postgres_container=$(docker ps -q --filter ancestor=postgres:16 | head -1)
+          test -n "$postgres_container"
+          docker stop "$postgres_container"
+          status=$(curl -sS -o ready-failure.json -w '%{http_code}' http://127.0.0.1:3000/ready || true)
+          test "$status" = "503"
+          for i in {1..10}; do
+            test -s alert-evidence.jsonl && break
+            sleep 1
+          done
+          grep -q 'readiness_failed' alert-evidence.jsonl
+          ! grep -q 'stack' ready-failure.json
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-ready-evidence
+          path: |
+            teamvault.log
+            alert-receiver.log
+            alert-evidence.jsonl
+            ready-failure.json
+            restore-evidence.txt
