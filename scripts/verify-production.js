@@ -78,6 +78,25 @@ async function main() {
   await check('edición propia funciona', async () => assert.equal((await alice('PUT', `/api/notes/${createdId}`, { title: 'PR persistence check', body: 'persisted after update' })).status, 200));
   await check('404 API controlado', async () => assert.equal((await alice('GET', '/api/no-existe')).status, 404));
 
+  await check('Origin cruzado es rechazado', async () => {
+    const res = await fetch(base + '/api/notes', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: 'https://evil.example',
+      },
+      body: JSON.stringify({ title: 'x', body: 'x' }),
+    });
+    assert.equal(res.status, 403);
+  });
+
+  await check('cabeceras de seguridad presentes', async () => {
+    const res = await fetch(base + '/health');
+    assert.equal(res.headers.get('x-frame-options'), 'DENY');
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+    assert.ok(res.headers.get('content-security-policy'));
+  });
+
   const client = new Client({ connectionString: dbUrl });
   await client.connect();
   const row = await client.query('SELECT title, body FROM notes WHERE id = $1', [createdId]);

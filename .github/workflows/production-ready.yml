@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -37,10 +40,21 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm install
+      - name: Prepare lockfile and install reproducibly
+        run: |
+          if [ ! -f package-lock.json ]; then
+            npm install --package-lock-only
+          fi
+          npm ci
 
-      - run: npm run db:init
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Apply migrations twice
+        run: |
+          npm run db:migrate
+          npm run db:migrate
+
       - run: npm run db:seed
 
       - name: Start alert receiver and TeamVault
@@ -117,6 +131,48 @@ jobs:
           grep -q 'readiness_failed' alert-evidence.jsonl
           ! grep -q 'stack' ready-failure.json
 
+      - name: Verify production guards
+        run: |
+          if NODE_ENV=production DATABASE_SSL=false SESSION_SECRET=12345678901234567890123456789012 node -e "require('./src/config')"; then
+            echo "expected DATABASE_SSL guard failure"; exit 1
+          fi
+          if NODE_ENV=production DATABASE_SSL=true SESSION_SECRET=short node -e "require('./src/config')"; then
+            echo "expected SESSION_SECRET guard failure"; exit 1
+          fi
+          if NODE_ENV=production DATABASE_SSL=true SESSION_SECRET=12345678901234567890123456789012 npm run db:seed; then
+            echo "expected demo seed production block"; exit 1
+          fi
+          if npm run prod:check; then
+            echo "expected active demo credential detection"; exit 1
+          fi
+          node -e "const b=require('bcryptjs'); b.hash('rotated-not-demo-password',10).then(h=>{console.log(h)})" > /tmp/newhash
+          newhash=$(cat /tmp/newhash)
+          postgres_container=$(docker ps -q --filter ancestor=postgres:16 | head -1)
+          docker start "$postgres_container" >/dev/null
+          for i in {1..20}; do docker exec "$postgres_container" pg_isready -U teamvault -d teamvault && break; sleep 1; done
+          docker exec "$postgres_container" psql -U teamvault -d teamvault -c "UPDATE users SET password_hash = '$newhash' WHERE username IN ('alice','bob','admin')"
+          npm run prod:check
+
+      - name: Verify graceful shutdown
+        run: |
+          PORT=3002 npm start > graceful.log 2>&1 &
+          pid=$!
+          for i in {1..20}; do curl -fsS http://127.0.0.1:3002/ready && break; sleep 1; done
+          kill -TERM "$pid"
+          wait "$pid"
+          grep -q '"type":"shutdown"' graceful.log
+
+      - name: Version generated lockfile
+        if: success()
+        run: |
+          if ! git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "build: add verified package lock [skip ci]"
+            git push origin HEAD:main
+          fi
+
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -124,6 +180,7 @@ jobs:
           name: production-ready-evidence
           path: |
             teamvault.log
+            graceful.log
             alert-receiver.log
             alert-evidence.jsonl
             ready-failure.json
