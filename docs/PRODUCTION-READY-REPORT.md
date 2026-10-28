@@ -3,191 +3,179 @@
 **Fecha:** 2026-10-28  
 **Repositorio:** `SintaraAMV/rango-b-production-ready-demo`  
 **Baseline:** `5f0fa7fd08cd90df2e4c54b3ada32c46b12e82e9`  
-**Commit verificado:** `fd1029bcbbc919bffb73ce22492978296548c58b`  
-**Workflow final:** GitHub Actions run #5 — PASS  
-**Tipo:** demo técnica sintética
+**Ground Truth:** revelado y comparado después de congelar la primera evaluación.  
+**Resultado final de la demo:** **GO CONDICIONADO**
 
-## Escenario acordado
+## Escenario
 
-TeamVault es un MVP Node.js/Express con PostgreSQL, sesiones persistidas, usuarios Alice/Bob/Admin y notas privadas. El escenario de referencia es un equipo pequeño (aprox. 10–30 usuarios), un único web service y una base PostgreSQL administrada. No hay pagos, webhooks ni requisitos regulatorios especiales.
+MVP Node.js/Express + PostgreSQL para 10–30 usuarios, un web service, notas privadas, Alice/Bob/Admin, sin pagos ni requisitos regulatorios especiales.
 
-La demo evalúa preparación técnica del release candidate. No se ha realizado un lanzamiento público en un proveedor externo dentro de esta ejecución.
+## Brechas del baseline confirmadas
 
-## Baseline observado
+- acceso cruzado por ID en lectura;
+- borrado cruzado;
+- vista global de notas accesible por usuario no-admin;
+- secreto de sesión de desarrollo;
+- logs con bodies;
+- stack de errores expuesto;
+- readiness sin comprobar PostgreSQL;
+- ausencia de evidencia de restore, migraciones repetibles y operación.
 
-La aplicación arrancaba conceptualmente y su flujo principal estaba implementado, pero el código inicial presentaba brechas de preparación:
+Estas brechas estaban acotadas: el caso correspondía a Production Ready y no a Rescue.
 
-- `SESSION_SECRET` tenía fallback fijo.
-- Los logs imprimían cuerpos completos de request.
-- Los errores devolvían `stack` al cliente.
-- `GET /api/notes/:id` no filtraba por propietario.
-- `DELETE /api/notes/:id` no filtraba por propietario.
-- `GET /api/admin/notes` solo exigía autenticación, no rol admin.
-- `/health` no comprobaba la dependencia PostgreSQL.
-- No existía evidencia ejecutada de alertas, backup/restore o rollback.
+## Cierre respecto al Ground Truth
 
-El caso seguía siendo un MVP funcional y acotado, por lo que se mantuvo en Production Ready y no se derivó a Rescue.
+### 1. PR-02 — identidad y acceso
 
-## Cambios aplicados
+**PASS**
 
-- Validación de `SESSION_SECRET` en producción.
-- Cookie de sesión `httpOnly`, `sameSite=lax` y `secure` en producción.
-- `trust proxy` en producción.
-- Request ID por petición.
-- Logs estructurados sin body ni credenciales.
-- Errores 5xx sanitizados sin stack para el cliente.
-- `/ready` con comprobación real de PostgreSQL.
-- Webhook de alerta para errores 5xx/readiness.
-- Autorización de propietario aplicada en SQL para leer, editar y borrar notas.
-- Middleware de rol admin para todo `/api/admin`.
-- Suite automática de pruebas con PostgreSQL real.
-- Prueba de caída de dependencia y recepción de alerta.
-- Backup PostgreSQL y restauración en DB aislada.
-- Smoke test de rollback de código.
-
-## Matriz PR-01 → PR-07
-
-### PR-01 — Build y configuración
-
-**Estado: PASS con riesgo residual menor.**
-
-Evidencia:
-
-- Node 22 en CI.
-- PostgreSQL 16 real.
-- instalación de dependencias exitosa;
-- esquema y seed ejecutados;
-- `DATABASE_URL`, `SESSION_SECRET`, `NODE_ENV`, `PORT` y `ALERT_WEBHOOK_URL` documentados;
-- secreto de sesión exigido en producción;
-- valores sensibles fuera del código/logs.
-
-Riesgo residual:
-
-El ZIP original incluía `package-lock.json`, pero ese archivo no quedó versionado en el repositorio durante esta ejecución por una limitación del canal de escritura usado. El workflow instala desde `package.json`; por tanto, la reproducibilidad de versiones transitivas no es absoluta. Antes de un lanzamiento real debe versionarse el lockfile.
-
-### PR-02 — Identidad y acceso a datos
-
-**Estado: PASS.**
-
-Pruebas ejecutadas:
+Evidencia ejecutada:
 
 - anónimo → notas: 401;
-- Alice lista únicamente sus notas;
-- Alice → GET nota Bob: 404;
-- Alice → PUT nota Bob: 404;
-- Alice → DELETE nota Bob: 404;
-- Bob → admin notes: 403;
-- Admin → admin notes: 200.
+- Alice solo lista sus notas;
+- Alice no lee nota de Bob;
+- Alice no edita nota de Bob;
+- Alice no borra nota de Bob;
+- Bob → admin: 403;
+- Admin → admin: 200.
 
-La autorización está aplicada en servidor/capa SQL, no solo en UI.
+La autorización está aplicada en SQL/server-side.
 
-### PR-03 — Persistencia y errores
+### 2. Secretos y credenciales demo
 
-**Estado: PASS.**
+**PASS**
 
-Pruebas:
+- `SESSION_SECRET` de mínimo 32 caracteres es obligatorio en producción.
+- `db:seed` está bloqueado cuando `NODE_ENV=production`.
+- existe un production safety check que compara las credenciales demo conocidas contra los hashes activos.
+- la prueba detectó realmente: `alice, bob, admin` como credenciales demo activas;
+- después de rotarlas, el mismo control dio PASS.
 
-- credenciales inválidas controladas;
-- input inválido: 400;
-- alta de nota: PASS;
-- relectura: PASS;
-- edición propia: PASS;
-- persistencia confirmada directamente en PostgreSQL;
-- ruta inexistente: 404;
-- readiness devuelve 503 cuando PostgreSQL cae;
-- respuestas no exponen stack;
-- logs no contienen las contraseñas demo.
+### 3. Errores, logs y readiness
 
-### PR-04 — Integraciones críticas
+**PASS**
 
-**Estado: N/A justificado.**
+- respuestas 5xx sanitizadas;
+- stack/SQL/host no se devuelven al cliente;
+- logs no incluyen las contraseñas demo;
+- request ID disponible;
+- `/ready` consulta PostgreSQL;
+- caída real del contenedor PostgreSQL → 503;
+- alerta `readiness_failed` recibida.
 
-El alcance no contiene pagos, webhooks de negocio ni integraciones críticas externas. El webhook de alerta pertenece a observabilidad y se evalúa en PR-05.
+### 4. Backup, restore, migraciones y shutdown
 
-### PR-05 — Observabilidad
+**PASS**
 
-**Estado: PASS para el escenario de demo.**
+- `pg_dump` real;
+- restore en otra base;
+- 7/7 notas recuperadas;
+- hash de contenido idéntico;
+- restore medido: 1 segundo en el dataset de demo;
+- migración `001_initial.sql` registrada en `schema_migrations`;
+- el runner ejecutó las migraciones dos veces sin error;
+- SIGTERM fue enviado directamente al proceso Node;
+- shutdown ordenado registrado y proceso terminó correctamente;
+- runbook actualizado.
 
-- logs estructurados con request ID, método, path, status y duración;
-- no se registran bodies de login;
-- caída real del PostgreSQL del entorno de prueba;
-- `/ready` respondió 503;
-- webhook recibió un evento `readiness_failed`;
-- evidencia guardada como artifact de GitHub Actions.
+El tiempo de 1 segundo no se ofrece como RTO general.
 
-La prueba demuestra transporte de alerta al receptor acordado de la demo; no demuestra un SLA humano 24×7.
+### 5. Cookie, proxy y TLS de base
 
-### PR-06 — Recuperación
+**GO condicionado**
 
-**Estado: PASS para el dataset/entorno probado.**
+Implementado:
 
-Run final:
+- `HttpOnly`;
+- `SameSite=Lax`;
+- `Secure` en producción;
+- `trust proxy = 1` en producción;
+- HSTS y cabeceras básicas;
+- `DATABASE_SSL=true` obligatorio en producción;
+- `rejectUnauthorized` configurable y seguro por defecto.
 
-- `pg_dump` ejecutado con herramientas PostgreSQL 16;
-- restauración en base aislada `teamvault_restore`;
-- notas origen: 7;
-- notas restauradas: 7;
-- hash de contenido: idéntico;
-- restore medido: 1 segundo en run #5.
+**NO VERIFICADO:** handshake TLS real contra el PostgreSQL administrado del proveedor final.
 
-Ese tiempo no es una promesa de RTO para otros volúmenes o proveedores.
+Según los criterios del Oracle, si este punto está implementado pero no probado en el proveedor real, la decisión correcta es **GO condicionado**, no NO-GO.
 
-### PR-07 — Release y operación
+### 6. Reproducibilidad y regresión
 
-**Estado: PASS para el release candidate / NO EVALUADO en proveedor público externo.**
+**PASS**
 
-- smoke del release candidate: PASS;
-- rollback real por Git al último commit de aplicación:
-  `04f1c50291cb2350aa5ee161ace88b5fd1b11273`;
-- instancia de rollback arrancada en puerto alternativo;
-- `/health`: PASS;
-- `/ready`: PASS;
-- rollback smoke: PASS.
+- `package-lock.json` quedó versionado por el run validado;
+- instalación reproducible mediante `npm ci`;
+- `npm audit --audit-level=high`: 0 vulnerabilidades;
+- 18/18 pruebas funcionales y de seguridad PASS;
+- rollback de código + health/readiness PASS;
+- persistencia PostgreSQL PASS;
+- no se observaron regresiones en los flujos cubiertos.
 
-No se desplegó TeamVault en Render, Neon u otro proveedor público dentro de esta ejecución, por lo que HTTPS, dominio, variables del proveedor y smoke de una URL pública no se afirman como verificados.
+### 7. Honestidad de evidencia
 
-## Evidencia automática final
+**PASS**
 
-GitHub Actions run #5:
+No se afirma:
 
-- controles funcionales/seguridad: **16/16 PASS**;
-- backup/restore: **PASS**;
-- conteo restaurado: **7/7**;
-- hash de contenido: **MATCH**;
-- restore medido: **1 s**;
-- rollback: **PASS**;
-- fallo de dependencia: **PASS**;
-- alerta recibida: **PASS**;
-- workflow final: **SUCCESS**.
+- TLS real del proveedor;
+- HTTPS público;
+- dominio real;
+- alerta entregada a una persona real;
+- capacidad para volúmenes no probados.
 
-## Decisión técnica
+Esos puntos requieren un entorno externo autorizado.
 
-### Release candidate
+## Controles recomendados adicionales
 
-**GO**
+También se implementaron:
 
-El código y la operación mínima probada son aptos para pasar a un entorno de staging/hosting autorizado.
+- rate limit básico de login;
+- regeneración de sesión después de login;
+- control de Origin en escrituras;
+- CSP;
+- X-Frame-Options;
+- X-Content-Type-Options;
+- Referrer-Policy;
+- HSTS en producción;
+- timeouts HTTP y PostgreSQL;
+- request IDs;
+- npm audit.
 
-### Lanzamiento público para usuarios reales
+La prueba automática verificó Origin y cabeceras de seguridad.
 
-**NO-GO todavía**
+## Evidencia final
 
-Bloqueos de lanzamiento:
+Run #11:
 
-1. versionar `package-lock.json`;
-2. desplegar en el proveedor objetivo autorizado;
-3. configurar secretos reales mediante el proveedor;
-4. verificar HTTPS y URL final;
-5. ejecutar smoke final en ese entorno;
-6. comprobar que la alerta llega al responsable real;
-7. asociar la estrategia de backup/restore al PostgreSQL administrado elegido.
+- instalación reproducible: PASS;
+- npm audit: 0 vulnerabilidades;
+- migraciones repetidas: PASS;
+- 18/18 controles funcionales/seguridad: PASS;
+- logs sanitizados: PASS;
+- backup/restore: PASS;
+- contenido restaurado: MATCH;
+- rollback: PASS;
+- caída de DB + alerta: PASS;
+- guards de producción: PASS;
+- credenciales demo activas detectadas: PASS;
+- credenciales rotadas aceptadas: PASS;
+- shutdown ordenado: PASS;
+- package-lock generado y versionado: PASS.
 
-Esto no invalida la preparación técnica realizada; separa correctamente el release candidate de una producción que todavía no fue desplegada.
+## Decisión
 
-## Resultado de la demo
+### Production Ready Demo 01
 
-**DEMO TÉCNICA EJECUTADA.**
+**GO CONDICIONADO**
 
-La aplicación pasó de un MVP funcional con brechas de acceso, configuración, errores y operación a un release candidate endurecido y validado automáticamente.
+La aplicación cumple los criterios técnicos ejecutables dentro del entorno controlado de la demo.
 
-La comparación contra el Ground Truth privado del CASE BUILDER debe hacerse después de congelar este resultado.
+Condición pendiente:
+
+> verificar TLS de extremo a extremo contra el PostgreSQL administrado del proveedor final y ejecutar el smoke del entorno público autorizado.
+
+No existe un NO-GO técnico abierto dentro del código/release candidate probado.
+
+## Estado del servicio
+
+**Production Ready — Demo técnica completada.**  
+**Simulación integral comercial pendiente.**

@@ -90,3 +90,14 @@ Si `/health` funciona y `/ready` devuelve 503:
 - [ ] smoke final PASS.
 
 Un control crítico necesario sin prueba mantiene NO-GO.
+
+
+## Addendum tras Ground Truth
+
+- Usar `npm ci`, no `npm install`, para el release reproducible.
+- Ejecutar `npm run db:migrate`; las migraciones son repetibles y quedan registradas en `schema_migrations`.
+- `npm run db:seed` está prohibido en producción.
+- Ejecutar el production safety check antes de release para impedir credenciales demo conocidas.
+- Producción exige `DATABASE_SSL=true`; mantener validación del certificado salvo requisito documentado del proveedor.
+- El servidor atiende SIGTERM/SIGINT con cierre HTTP y cierre del pool PostgreSQL.
+- Antes de GO definitivo, probar el handshake TLS contra el proveedor real.
