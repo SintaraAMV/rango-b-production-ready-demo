@@ -82,6 +82,25 @@ jobs:
           echo "notes_original=$original notes_restored=$restored" | tee -a restore-evidence.txt
           echo "content_hash_match=yes" | tee -a restore-evidence.txt
 
+      - name: Verify code rollback and smoke
+        run: |
+          release_sha=$(git rev-parse HEAD)
+          rollback_sha=$(git log -1 --format=%H -- src/app.js)
+          test -n "$rollback_sha"
+          git checkout --detach "$rollback_sha"
+          PORT=3001 npm start > rollback.log 2>&1 &
+          rollback_pid=$!
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:3001/ready; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3001/health
+          curl -fsS http://127.0.0.1:3001/ready
+          kill "$rollback_pid"
+          git checkout --detach "$release_sha"
+          echo "rollback_sha=$rollback_sha" | tee rollback-evidence.txt
+          echo "rollback_smoke=pass" | tee -a rollback-evidence.txt
+
       - name: Verify dependency failure and alert delivery
         run: |
           postgres_container=$(docker ps -q --filter ancestor=postgres:16 | head -1)
@@ -107,3 +126,5 @@ jobs:
             alert-evidence.jsonl
             ready-failure.json
             restore-evidence.txt
+            rollback-evidence.txt
+            rollback.log
