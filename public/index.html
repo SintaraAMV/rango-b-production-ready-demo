@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TeamVault</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>TeamVault</h1>
+    <div id="userbox" class="userbox hidden">
+      <span id="whoami"></span>
+      <button id="logout-btn" type="button" class="secondary">Cerrar sesión</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="login-view" class="card hidden">
+      <h2>Iniciar sesión</h2>
+      <form id="login-form">
+        <label>Usuario
+          <input type="text" id="login-username" autocomplete="username" required>
+        </label>
+        <label>Contraseña
+          <input type="password" id="login-password" autocomplete="current-password" required>
+        </label>
+        <button type="submit">Entrar</button>
+        <p id="login-error" class="error"></p>
+      </form>
+    </section>
+
+    <section id="notes-view" class="hidden">
+      <div class="card">
+        <h2>Nueva nota</h2>
+        <form id="note-form">
+          <label>Título
+            <input type="text" id="note-title" maxlength="200" required>
+          </label>
+          <label>Contenido
+            <textarea id="note-body" rows="3"></textarea>
+          </label>
+          <button type="submit">Guardar nota</button>
+          <p id="note-error" class="error"></p>
+        </form>
+      </div>
+      <h2>Mis notas</h2>
+      <ul id="notes-list" class="notes"></ul>
+      <p id="notes-empty" class="muted hidden">Todavía no tienes notas.</p>
+    </section>
+
+    <section id="admin-view" class="hidden">
+      <h2>Administración</h2>
+      <div class="card">
+        <h3>Usuarios</h3>
+        <table id="admin-users">
+          <thead><tr><th>ID</th><th>Usuario</th><th>Rol</th><th>Notas</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Todas las notas</h3>
+        <table id="admin-notes">
+          <thead><tr><th>ID</th><th>Propietario</th><th>Título</th><th>Actualizada</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
